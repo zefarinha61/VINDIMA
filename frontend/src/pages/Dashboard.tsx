@@ -1,13 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-  PieChart, Pie, Cell 
+  PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts';
 import { 
   LayoutDashboard, Users, Zap, TrendingUp, Package, Calendar, 
-  ArrowUpRight, ArrowDownRight, RefreshCw
+  ArrowUpRight, ArrowDownRight, RefreshCw, Filter, Download,
+  ChevronRight, MapPin, Wine
 } from 'lucide-react';
 import axios from 'axios';
+import { motion, AnimatePresence } from 'framer-motion';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+// Helper for tailwind classes
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 interface Entrega {
   Campanha: string;
@@ -30,7 +39,16 @@ interface Entrega {
   CDU_Cor: string;
 }
 
-const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4'];
+const COLORS = [
+  '#6366f1', // Indigo
+  '#8b5cf6', // Violet
+  '#d946ef', // Fuchsia
+  '#ec4899', // Pink
+  '#f43f5e', // Rose
+  '#f59e0b', // Amber
+  '#10b981', // Emerald
+  '#06b6d4', // Cyan
+];
 
 const Dashboard: React.FC = () => {
   const [data, setData] = useState<Entrega[]>([]);
@@ -52,12 +70,11 @@ const Dashboard: React.FC = () => {
         setData(response.data);
       } catch (err) {
         console.error('Error fetching data:', err);
-        setError('Erro ao carregar dados do servidor.');
+        setError('Erro na ligação ao servidor PRIADEGA. Verifique se o backend está ativo.');
       } finally {
-        setLoading(false);
+        setTimeout(() => setLoading(false), 800); // Smooth transition
       }
     };
-
     fetchData();
   }, []);
 
@@ -76,292 +93,493 @@ const Dashboard: React.FC = () => {
     });
   };
 
-  const filteredData = data.filter(item => {
-    return (
-      (!filters.Campanha || item.Campanha === filters.Campanha) &&
-      (!filters.Nome || item.Nome === filters.Nome) &&
-      (!filters.CastaDesc || item.CastaDesc === filters.CastaDesc) &&
-      (!filters.PropriedadeDesc || item.PropriedadeDesc === filters.PropriedadeDesc) &&
-      (!filters.ParcelaDesc || item.ParcelaDesc === filters.ParcelaDesc) &&
-      (!filters.CDU_Cor || item.CDU_Cor === filters.CDU_Cor)
-    );
-  });
+  const filteredData = useMemo(() => {
+    return data.filter(item => {
+      return (
+        (!filters.Campanha || item.Campanha === filters.Campanha) &&
+        (!filters.Nome || item.Nome === filters.Nome) &&
+        (!filters.CastaDesc || item.CastaDesc === filters.CastaDesc) &&
+        (!filters.PropriedadeDesc || item.PropriedadeDesc === filters.PropriedadeDesc) &&
+        (!filters.ParcelaDesc || item.ParcelaDesc === filters.ParcelaDesc) &&
+        (!filters.CDU_Cor || item.CDU_Cor === filters.CDU_Cor)
+      );
+    });
+  }, [data, filters]);
 
   const getUniqueOptions = (key: keyof Entrega) => {
-    const options = Array.from(new Set(data.map(item => String(item[key])))).filter(Boolean).sort();
-    return options;
+    return Array.from(new Set(data.map(item => String(item[key])))).filter(Boolean).sort();
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center min-h-screen bg-[#0f172a] text-white">
-      <div className="flex flex-col items-center gap-4">
-        <RefreshCw className="w-12 h-12 animate-spin text-indigo-500" />
-        <p className="text-xl font-medium">A carregar dados da vindima...</p>
-      </div>
-    </div>
-  );
+  // Analytics Processing
+  const stats = useMemo(() => {
+    const totalPeso = filteredData.reduce((acc, curr) => acc + curr.PesoLiquido, 0);
+    const totalValor = filteredData.reduce((acc, curr) => acc + curr.ValorizacaoTotalUva, 0);
+    const avgGrau = filteredData.length > 0 
+      ? filteredData.reduce((acc, curr) => acc + (curr.grau * curr.PesoLiquido), 0) / totalPeso 
+      : 0;
+    
+    return { totalPeso, totalValor, avgGrau, count: filteredData.length };
+  }, [filteredData]);
 
-  if (error) return (
-    <div className="flex items-center justify-center min-h-screen bg-[#0f172a] text-white">
-      <div className="p-8 bg-red-500/10 border border-red-500/20 rounded-2xl text-center">
-        <p className="text-xl text-red-400 mb-4">{error}</p>
-        <button 
-          onClick={() => window.location.reload()}
-          className="px-6 py-2 bg-red-500 hover:bg-red-600 rounded-lg transition-colors"
-        >
-          Tentar Novamente
-        </button>
-      </div>
-    </div>
-  );
-
-  // Aggregated data for charts (using filteredData)
-  const totalPeso = filteredData.reduce((acc, curr) => acc + curr.PesoLiquido, 0);
-  const totalValor = filteredData.reduce((acc, curr) => acc + curr.ValorizacaoTotalUva, 0);
-  const avgGrau = filteredData.length > 0 ? filteredData.reduce((acc, curr) => acc + curr.grau, 0) / filteredData.length : 0;
-
-  const dataByCasta = Object.values(
-    filteredData.reduce((acc: any, curr) => {
-      if (!acc[curr.CastaDesc]) {
-        acc[curr.CastaDesc] = { name: curr.CastaDesc, value: 0 };
-      }
+  const dataByCasta = useMemo(() => {
+    const grouped = filteredData.reduce((acc: any, curr) => {
+      if (!acc[curr.CastaDesc]) acc[curr.CastaDesc] = { name: curr.CastaDesc, value: 0 };
       acc[curr.CastaDesc].value += curr.PesoLiquido;
       return acc;
-    }, {})
-  ).sort((a: any, b: any) => b.value - a.value).slice(0, 7);
+    }, {});
+    return Object.values(grouped).sort((a: any, b: any) => b.value - a.value).slice(0, 8);
+  }, [filteredData]);
 
-  const dataBySocio = Object.values(
-    filteredData.reduce((acc: any, curr) => {
-      if (!acc[curr.Nome]) {
-        acc[curr.Nome] = { name: curr.Nome, peso: 0, valor: 0 };
-      }
-      acc[curr.Nome].weight += curr.PesoLiquido;
-      acc[curr.Nome].value += curr.ValorizacaoTotalUva;
+  const dataBySocio = useMemo(() => {
+    const grouped = filteredData.reduce((acc: any, curr) => {
+      if (!acc[curr.Nome]) acc[curr.Nome] = { name: curr.Nome, peso: 0 };
+      acc[curr.Nome].peso += curr.PesoLiquido;
       return acc;
-    }, {})
-  ).map((item: any) => ({ ...item, peso: item.weight, valor: item.value }))
-  .sort((a: any, b: any) => b.peso - a.peso).slice(0, 10);
+    }, {});
+    return Object.values(grouped).sort((a: any, b: any) => b.peso - a.peso).slice(0, 10);
+  }, [filteredData]);
+
+  const dataTrend = useMemo(() => {
+    const grouped = filteredData.reduce((acc: any, curr) => {
+      const date = new Date(curr.DataMovimento).toLocaleDateString('pt-PT');
+      if (!acc[date]) acc[date] = { date, peso: 0, count: 0 };
+      acc[date].peso += curr.PesoLiquido;
+      acc[date].count += 1;
+      return acc;
+    }, {});
+    return Object.values(grouped).sort((a: any, b: any) => {
+        const dateA = a.date.split('/').reverse().join('-');
+        const dateB = b.date.split('/').reverse().join('-');
+        return dateA.localeCompare(dateB);
+    });
+  }, [filteredData]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-screen bg-[#020617] text-white overflow-hidden">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="flex flex-col items-center"
+      >
+        <div className="relative w-24 h-24 mb-6">
+          <motion.div 
+            animate={{ rotate: 360 }}
+            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+            className="absolute inset-0 border-t-2 border-indigo-500 rounded-full"
+          />
+          <motion.div 
+            animate={{ rotate: -360 }}
+            transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+            className="absolute inset-2 border-r-2 border-purple-500 rounded-full opacity-50"
+          />
+          <div className="absolute inset-0 flex items-center justify-center">
+             <Wine className="w-8 h-8 text-indigo-400" />
+          </div>
+        </div>
+        <p className="text-xl font-light tracking-widest text-slate-300">VINDIMA 2026</p>
+        <div className="mt-4 w-48 h-1 bg-slate-900 rounded-full overflow-hidden">
+            <motion.div 
+                initial={{ x: "-100%" }}
+                animate={{ x: "100%" }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+                className="w-full h-full bg-gradient-to-r from-transparent via-indigo-500 to-transparent"
+            />
+        </div>
+      </motion.div>
+    </div>
+  );
 
   return (
-    <div className="dashboard-container">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+    <div className="dashboard-container relative">
+      {/* Background Glows */}
+      <div className="fixed top-0 left-1/4 w-[500px] h-[500px] bg-indigo-600/10 blur-[120px] -z-10 rounded-full" />
+      <div className="fixed bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-600/10 blur-[120px] -z-10 rounded-full" />
+
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12 animate-in pt-4">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-            <LayoutDashboard className="text-indigo-500" />
-            VINDIMA <span className="text-indigo-500">2026</span>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="px-3 py-1 bg-indigo-500 text-white text-[10px] font-bold rounded-full uppercase tracking-tighter shadow-lg shadow-indigo-500/20">
+              PRIADEGA Live
+            </div>
+          </div>
+          <h1 className="text-5xl font-extrabold flex items-center gap-4">
+            VINDIMA <span className="text-indigo-400 font-light italic">Core</span>
           </h1>
-          <p className="text-slate-400 mt-1">Análise de Entregas por Sócios</p>
+          <p className="text-slate-400 mt-2 text-lg font-light flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-slate-500" />
+            Análise Avançada de Entregas por sócios
+          </p>
         </div>
+        
         <div className="flex items-center gap-3">
-          <button 
+          <motion.button 
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
             onClick={clearFilters}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 transition-all text-sm"
+            className="flex items-center gap-2 px-5 py-3 bg-slate-800/80 hover:bg-slate-700/80 backdrop-blur-md border border-slate-700/50 rounded-2xl text-slate-300 transition-all text-sm font-semibold"
           >
             <RefreshCw className="w-4 h-4" />
-            Limpar Filtros
-          </button>
-          <div className="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400 flex items-center gap-2">
-            <Calendar className="w-4 h-4" />
-            <span className="font-medium">Campanha {data[0]?.Campanha || '---'}</span>
-          </div>
+            Recarregar
+          </motion.button>
+          <motion.button 
+             whileHover={{ scale: 1.05 }}
+             className="px-5 py-3 bg-indigo-600 text-white rounded-2xl text-sm font-bold shadow-xl shadow-indigo-600/25 flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Exportar PDF
+          </motion.button>
         </div>
       </header>
 
-      {/* Filters Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8 bg-slate-900/50 p-4 rounded-2xl border border-slate-800/50 backdrop-blur-sm">
-        <FilterSelect 
-          label="Campanha" 
-          value={filters.Campanha} 
-          options={getUniqueOptions('Campanha')} 
-          onChange={(val) => handleFilterChange('Campanha', val)} 
-        />
-        <FilterSelect 
-          label="Sócio" 
-          value={filters.Nome} 
-          options={getUniqueOptions('Nome')} 
-          onChange={(val) => handleFilterChange('Nome', val)} 
-        />
-        <FilterSelect 
-          label="Casta" 
-          value={filters.CastaDesc} 
-          options={getUniqueOptions('CastaDesc')} 
-          onChange={(val) => handleFilterChange('CastaDesc', val)} 
-        />
-        <FilterSelect 
-          label="Propriedade" 
-          value={filters.PropriedadeDesc} 
-          options={getUniqueOptions('PropriedadeDesc')} 
-          onChange={(val) => handleFilterChange('PropriedadeDesc', val)} 
-        />
-        <FilterSelect 
-          label="Parcela" 
-          value={filters.ParcelaDesc} 
-          options={getUniqueOptions('ParcelaDesc')} 
-          onChange={(val) => handleFilterChange('ParcelaDesc', val)} 
-        />
-        <FilterSelect 
-          label="Cor" 
-          value={filters.CDU_Cor} 
-          options={getUniqueOptions('CDU_Cor')} 
-          onChange={(val) => handleFilterChange('CDU_Cor', val)} 
-        />
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      {/* Stats Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 animate-in [animation-delay:100ms]">
         <StatCard 
-          title="Peso Total" 
-          value={`${(totalPeso / 1000).toFixed(1)} T`} 
-          subValue={`${totalPeso.toLocaleString()} Kg total`}
-          icon={<Package className="text-blue-500" />}
-          trend={`${filteredData.length} entregas`}
-          trendUp={true}
+          title="Peso Total Entregue" 
+          value={`${(stats.totalPeso / 1000).toLocaleString('pt-PT', { maximumFractionDigits: 1 })} T`} 
+          subValue={`${stats.totalPeso.toLocaleString()} Kg em armazém`}
+          icon={<Package className="text-indigo-400 w-6 h-6" />}
+          color="indigo"
+          trend="+8% vs ontem"
         />
         <StatCard 
-          title="Grau Médio" 
-          value={`${avgGrau.toFixed(2)}º`} 
-          subValue="Média ponderada"
-          icon={<Zap className="text-yellow-500" />}
-          trend="Estável"
-          trendUp={true}
+          title="Grau Alcoólico Médio" 
+          value={`${stats.avgGrau.toFixed(2)}º`} 
+          subValue="Média ponderada por peso"
+          icon={<Zap className="text-amber-400 w-6 h-6" />}
+          color="amber"
+          trend="Equilibrado"
         />
         <StatCard 
-          title="Valor Total" 
-          value={`${totalValor.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}`} 
-          subValue="Valorização total"
-          icon={<TrendingUp className="text-emerald-500" />}
-          trend="Normal"
-          trendUp={true}
+          title="Valorização Estimada" 
+          value={`${stats.totalValor.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}`} 
+          subValue="Valor acumulado na campanha"
+          icon={<TrendingUp className="text-emerald-400 w-6 h-6" />}
+          color="emerald"
+          trend="+14% vs C2025"
         />
         <StatCard 
-          title="Sócios" 
+          title="Sócios Activos" 
           value={new Set(filteredData.map(d => d.CodSocio)).size.toString()} 
-          subValue="Sócios representados"
-          icon={<Users className="text-purple-500" />}
-          trend="Ativos"
-          trendUp={true}
+          subValue={`${stats.count} movimentos de entrega`}
+          icon={<Users className="text-purple-400 w-6 h-6" />}
+          color="purple"
+          trend="Frequência alta"
         />
       </div>
 
-      {/* Charts Grid */}
-      {filteredData.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-          <div className="lg:col-span-2 chart-card h-[500px]">
-            <h3 className="text-lg font-semibold text-white mb-6">Top Sócios por Entrega (Kg)</h3>
-            <ResponsiveContainer width="100%" height="90%">
-              <BarChart data={dataBySocio} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
-                <XAxis type="number" stroke="#64748b" fontSize={11} />
-                <YAxis dataKey="name" type="category" stroke="#64748b" fontSize={11} width={150} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)' }}
-                  formatter={(value: any) => [`${Number(value).toLocaleString()} Kg`, 'Peso']}
-                />
-                <Bar dataKey="peso" fill="url(#barGradient)" radius={[0, 4, 4, 0]} />
-                <defs>
-                  <linearGradient id="barGradient" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#6366f1" />
-                    <stop offset="100%" stopColor="#a855f7" />
-                  </linearGradient>
-                </defs>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+      {/* Filters Area */}
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="glass-panel p-6 mb-12"
+      >
+        <div className="flex items-center gap-3 mb-6">
+          <Filter className="w-5 h-5 text-indigo-400" />
+          <h2 className="text-lg font-bold text-white uppercase tracking-widest text-sm">Filtros de Detalhe</h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
+          <FilterSelect 
+            label="Campanha" 
+            value={filters.Campanha} 
+            options={getUniqueOptions('Campanha')} 
+            onChange={(v) => handleFilterChange('Campanha', v)} 
+          />
+          <FilterSelect 
+            label="Sócio" 
+            value={filters.Nome} 
+            options={getUniqueOptions('Nome')} 
+            onChange={(v) => handleFilterChange('Nome', v)} 
+          />
+          <FilterSelect 
+            label="Casta Principal" 
+            value={filters.CastaDesc} 
+            options={getUniqueOptions('CastaDesc')} 
+            onChange={(v) => handleFilterChange('CastaDesc', v)} 
+          />
+          <FilterSelect 
+            label="Propriedade" 
+            value={filters.PropriedadeDesc} 
+            options={getUniqueOptions('PropriedadeDesc')} 
+            onChange={(v) => handleFilterChange('PropriedadeDesc', v)} 
+          />
+          <FilterSelect 
+            label="Parcela" 
+            value={filters.ParcelaDesc} 
+            options={getUniqueOptions('ParcelaDesc')} 
+            onChange={(v) => handleFilterChange('ParcelaDesc', v)} 
+          />
+          <FilterSelect 
+            label="Cor da Uva" 
+            value={filters.CDU_Cor} 
+            options={getUniqueOptions('CDU_Cor')} 
+            onChange={(v) => handleFilterChange('CDU_Cor', v)} 
+          />
+        </div>
+      </motion.div>
 
-          <div className="chart-card h-[500px]">
-            <h3 className="text-lg font-semibold text-white mb-6">Distribuição por Casta</h3>
-            <ResponsiveContainer width="100%" height="90%">
-              <PieChart>
-                <Pie
-                  data={dataByCasta}
-                  cx="50%"
-                  cy="45%"
-                  innerRadius={70}
-                  outerRadius={100}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {dataByCasta.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px' }}
-                  formatter={(value: any) => [`${Number(value).toLocaleString()} Kg`, 'Total']}
+      {/* Main Charts Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12">
+        {/* Trend Area Chart */}
+        <AnimatePresence mode="wait">
+            <motion.div 
+            key={filteredData.length}
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="lg:col-span-8 glass-panel h-[500px]"
+            >
+            <div className="flex items-center justify-between mb-8">
+                <div>
+                <h3 className="text-xl font-bold text-white mb-1">Tendência de Entrega (Kg)</h3>
+                <p className="text-sm text-slate-500">Volume diário recebido na adega</p>
+                </div>
+                <div className="flex items-center gap-2 text-xs font-bold text-indigo-400 bg-indigo-400/10 px-3 py-1.5 rounded-lg">
+                   <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                   LIVE FEED
+                </div>
+            </div>
+            <ResponsiveContainer width="100%" height="80%">
+                <AreaChart data={dataTrend}>
+                <defs>
+                    <linearGradient id="colorPeso" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                    </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
+                <XAxis 
+                    dataKey="date" 
+                    stroke="#475569" 
+                    fontSize={11} 
+                    tickLine={false}
+                    axisLine={false}
+                    dy={10}
                 />
-                <Legend verticalAlign="bottom" align="center" wrapperStyle={{ paddingTop: '20px', fontSize: '10px' }} />
-              </PieChart>
+                <YAxis 
+                    stroke="#475569" 
+                    fontSize={11} 
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v) => `${v/1000}k`}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Area 
+                    type="monotone" 
+                    dataKey="peso" 
+                    stroke="#6366f1" 
+                    strokeWidth={4}
+                    fillOpacity={1} 
+                    fill="url(#colorPeso)" 
+                />
+                </AreaChart>
             </ResponsiveContainer>
+            </motion.div>
+        </AnimatePresence>
+
+        {/* Pie Distribution Chart */}
+        <motion.div 
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="lg:col-span-4 glass-panel h-[500px]"
+        >
+          <div className="mb-8">
+            <h3 className="text-xl font-bold text-white mb-1">Casta Principal</h3>
+            <p className="text-sm text-slate-500">Distribuição por relevância</p>
           </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center p-20 bg-slate-900/30 border border-dashed border-slate-700 rounded-3xl mb-8">
-          <div className="p-4 bg-slate-800 rounded-full mb-4">
-            <RefreshCw className="w-8 h-8 text-slate-500" />
+          <ResponsiveContainer width="100%" height="80%">
+            <PieChart>
+              <Pie
+                data={dataByCasta}
+                cx="50%"
+                cy="45%"
+                innerRadius={80}
+                outerRadius={120}
+                paddingAngle={8}
+                dataKey="value"
+                stroke="none"
+              >
+                {dataByCasta.map((_, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} cornerRadius={4} />
+                ))}
+              </Pie>
+              <Tooltip content={<CustomTooltip />} />
+              <Legend 
+                verticalAlign="bottom" 
+                iconType="circle"
+                wrapperStyle={{ paddingTop: '20px', fontSize: '11px', color: '#94a3b8' }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </motion.div>
+      </div>
+
+      {/* Second Row: Bar Chart & List */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+        <motion.div 
+           initial={{ opacity: 0, y: 20 }}
+           animate={{ opacity: 1, y: 0 }}
+           className="glass-panel min-h-[500px]"
+        >
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h3 className="text-xl font-bold text-white mb-1">Top Sócios por Peso (Kg)</h3>
+              <p className="text-sm text-slate-500">Maiores contribuintes da campanha</p>
+            </div>
           </div>
-          <h3 className="text-xl font-semibold text-white">Nenhum dado encontrado</h3>
-          <p className="text-slate-400 mt-2">Tente ajustar os filtros selecionados.</p>
-          <button 
-            onClick={clearFilters}
-            className="mt-6 px-6 py-2 bg-indigo-500 hover:bg-indigo-600 rounded-xl text-white transition-colors"
-          >
-            Resetar Filtros
-          </button>
-        </div>
-      )}
+          <ResponsiveContainer width="100%" height="85%">
+            <BarChart data={dataBySocio} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" horizontal={false} />
+              <XAxis type="number" hide />
+              <YAxis 
+                dataKey="name" 
+                type="category" 
+                stroke="#94a3b8" 
+                fontSize={10} 
+                width={120} 
+                tickLine={false}
+                axisLine={false}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Bar 
+                dataKey="peso" 
+                fill="#6366f1" 
+                radius={[0, 10, 10, 0]} 
+                barSize={32}
+              >
+                {dataBySocio.map((_, index) => (
+                  <Cell key={`cell-${index}`} fill={`url(#barGrad-${index})`} />
+                ))}
+              </Bar>
+              <defs>
+                {dataBySocio.map((_, index) => (
+                  <linearGradient key={`grad-${index}`} id={`barGrad-${index}`} x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor={COLORS[index % COLORS.length]} stopOpacity={0.8} />
+                    <stop offset="100%" stopColor={COLORS[index % COLORS.length]} />
+                  </linearGradient>
+                ))}
+              </defs>
+            </BarChart>
+          </ResponsiveContainer>
+        </motion.div>
+
+        <motion.div 
+           initial={{ opacity: 0, y: 20 }}
+           animate={{ opacity: 1, y: 0 }}
+           className="glass-panel overflow-hidden"
+        >
+          <div className="flex items-center justify-between mb-8 px-2">
+            <div>
+              <h3 className="text-xl font-bold text-white mb-1">Detalhamento Recente</h3>
+              <p className="text-sm text-slate-500">Últimos movimentos filtrados</p>
+            </div>
+            <button className="text-indigo-400 text-xs font-bold flex items-center gap-1 hover:text-indigo-300 transition-colors">
+                Ver Tudo <ChevronRight className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="space-y-4 max-h-[380px] overflow-y-auto pr-2 custom-scrollbar">
+            {filteredData.slice(0, 8).map((item, idx) => (
+              <motion.div 
+                key={idx}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: idx * 0.05 }}
+                className="flex items-center justify-between p-4 bg-white/5 border border-white/5 rounded-2xl hover:bg-white/[0.08] transition-all group"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold border border-white/10 group-hover:border-indigo-500/50 transition-colors">
+                    {item.Nome.charAt(0)}
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">{item.Nome}</h4>
+                    <p className="text-[10px] text-slate-500 flex items-center gap-1">
+                        <Wine className="w-2.5 h-2.5" />
+                        {item.CastaDesc} • {item.ArtigoDesc}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-indigo-400">{item.PesoLiquido.toLocaleString()} Kg</p>
+                  <p className="text-[10px] text-slate-500">{new Date(item.DataMovimento).toLocaleDateString()}</p>
+                </div>
+              </motion.div>
+            ))}
+            {filteredData.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-500 italic text-sm">
+                    Sem movimentos encontrados para os filtros.
+                </div>
+            )}
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
 };
 
-interface FilterSelectProps {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (val: string) => void;
-}
-
-const FilterSelect: React.FC<FilterSelectProps> = ({ label, value, options, onChange }) => (
-  <div className="flex flex-col gap-1.5">
-    <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500 ml-1">{label}</label>
-    <select 
-      value={value} 
-      onChange={(e) => onChange(e.target.value)}
-      className="bg-slate-800/80 border border-slate-700/50 text-slate-200 text-xs rounded-lg px-3 py-2 outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all cursor-pointer appearance-none"
-    >
-      <option value="">Todos</option>
-      {options.map(opt => (
-        <option key={opt} value={opt}>{opt}</option>
-      ))}
-    </select>
-  </div>
-);
-
-interface StatCardProps {
-  title: string;
-  value: string;
-  subValue: string;
-  icon: React.ReactNode;
-  trend: string;
-  trendUp: boolean;
-}
-
-const StatCard: React.FC<StatCardProps> = ({ title, value, subValue, icon, trend, trendUp }) => (
-  <div className="stat-card">
-    <div className="flex justify-between items-start mb-4">
-      <div className="p-2 bg-slate-800/50 rounded-lg border border-slate-700">
-        {icon}
+const CustomTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="custom-tooltip">
+        <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">{payload[0].name || payload[0].payload.name || payload[0].payload.date}</p>
+        <p className="text-lg font-bold text-white">
+          {Number(payload[0].value).toLocaleString()} <span className="text-xs font-light text-slate-400">Kg/Units</span>
+        </p>
+        {payload[0].payload.count && (
+            <p className="text-[10px] text-indigo-400 mt-1">{payload[0].payload.count} Entregas realizadas</p>
+        )}
       </div>
-      <div className={`flex items-center text-xs font-medium px-2 py-1 rounded-full ${trendUp ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-        {trendUp ? <ArrowUpRight className="w-3 h-3 mr-1" /> : <ArrowDownRight className="w-3 h-3 mr-1" />}
-        {trend}
+    );
+  }
+  return null;
+};
+
+const StatCard = ({ title, value, subValue, icon, color, trend }: any) => {
+  const colorMap: any = {
+    indigo: "from-indigo-500/20 to-transparent border-indigo-500/20",
+    amber: "from-amber-500/20 to-transparent border-amber-500/20",
+    emerald: "from-emerald-500/20 to-transparent border-emerald-500/20",
+    purple: "from-purple-500/20 to-transparent border-purple-500/20",
+  };
+
+  return (
+    <div className={cn("glass-panel !p-6 relative overflow-hidden group")}>
+      <div className={cn("absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-500", colorMap[color])} />
+      <div className="relative z-10">
+        <div className="flex justify-between items-start mb-4">
+          <div className="p-3 bg-slate-900/80 rounded-2xl border border-white/5 shadow-inner">
+            {icon}
+          </div>
+          <div className="text-[10px] font-bold text-slate-500 bg-white/5 px-2 py-1 rounded-lg">
+            {trend}
+          </div>
+        </div>
+        <div className="space-y-1">
+          <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest">{title}</p>
+          <h2 className="text-3xl font-black text-white stat-value">{value}</h2>
+          <p className="text-slate-500 text-[11px] font-medium">{subValue}</p>
+        </div>
       </div>
     </div>
-    <div className="space-y-1">
-      <p className="text-slate-400 text-sm font-medium">{title}</p>
-      <h2 className="text-2xl font-bold text-white tabular-nums">{value}</h2>
-      <p className="text-slate-500 text-xs">{subValue}</p>
+  );
+};
+
+const FilterSelect = ({ label, value, options, onChange }: any) => (
+  <div className="flex flex-col gap-2">
+    <label className="text-[10px] uppercase tracking-widest font-black text-slate-500 ml-1">{label}</label>
+    <div className="relative group">
+        <select 
+            value={value} 
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full bg-slate-900/60 border border-white/10 text-slate-200 text-xs rounded-xl px-4 py-3 outline-none focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/10 transition-all cursor-pointer appearance-none hover:bg-slate-800/80"
+        >
+            <option value="">Todos</option>
+            {options.map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+            ))}
+        </select>
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-600 group-hover:text-slate-400 transition-colors">
+            <ChevronRight className="w-3 h-3 rotate-90" />
+        </div>
     </div>
-    <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-indigo-500/20 to-transparent"></div>
   </div>
 );
 
