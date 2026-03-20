@@ -1,15 +1,14 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
-  PieChart, Pie, Cell, AreaChart, Area
+  PieChart, Pie, Cell
 } from 'recharts';
 import { 
-  LayoutDashboard, Users, Zap, TrendingUp, Package, Calendar, 
-  RefreshCw, Filter, ChevronRight, Layers, Table as TableIcon,
-  Search, Info, Menu, X
+  Zap, TrendingUp, Package, 
+  RefreshCw, Layers, Table as TableIcon,
+  Info, ChevronRight
 } from 'lucide-react';
 import axios from 'axios';
-import { motion, AnimatePresence } from 'framer-motion';
 
 interface Entrega {
   Campanha: string;
@@ -37,7 +36,6 @@ const COLORS = ['#4f46e5', '#8b5cf6', '#d946ef', '#ec4899', '#f43f5e', '#ef4444'
 const Dashboard: React.FC = () => {
   const [data, setData] = useState<Entrega[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     Campanha: '',
     Nome: '',
@@ -52,9 +50,6 @@ const Dashboard: React.FC = () => {
       try {
         const response = await axios.get('http://localhost:3001/api/entregas');
         setData(response.data);
-      } catch (err) {
-        console.error('Error:', err);
-        setError('Erro na ligação à base de dados.');
       } finally {
         setLoading(false);
       }
@@ -63,7 +58,7 @@ const Dashboard: React.FC = () => {
   }, []);
 
   const handleFilterChange = (key: string, value: string) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
+    setFilters((prev: any) => ({ ...prev, [key]: value }));
   };
 
   const clearFilters = () => {
@@ -90,35 +85,77 @@ const Dashboard: React.FC = () => {
     });
   }, [data, filters]);
 
-  const getUniqueOptions = (key: keyof Entrega) => {
-    return Array.from(new Set(data.map(item => String(item[key])))).filter(Boolean).sort();
-  };
+  const availableOptions = useMemo(() => {
+    const fields = Object.keys(filters) as (keyof typeof filters)[];
+    const results: Record<string, string[]> = {};
+
+    fields.forEach(field => {
+      results[field] = Array.from(new Set(
+        data.filter(item => {
+          return fields.every(otherField => {
+            if (otherField === field || !filters[otherField]) return true;
+            return String(item[otherField as keyof Entrega]) === filters[otherField];
+          });
+        }).map(item => String(item[field as keyof Entrega]))
+      )).filter(Boolean).sort();
+    });
+
+    return results;
+  }, [data, filters]);
 
   const stats = useMemo(() => {
     const totalPeso = filteredData.reduce((acc, curr) => acc + curr.PesoLiquido, 0);
     const totalValor = filteredData.reduce((acc, curr) => acc + curr.ValorizacaoTotalUva, 0);
-    const avgGrau = filteredData.length > 0 
-      ? filteredData.reduce((acc, curr) => acc + (curr.grau * curr.PesoLiquido), 0) / totalPeso 
-      : 0;
-    return { totalPeso, totalValor, avgGrau, count: filteredData.length };
+    const totalGrauKilos = filteredData.reduce((acc, curr) => acc + (curr.grau * curr.PesoLiquido), 0);
+    const avgGrau = totalPeso > 0 ? totalGrauKilos / totalPeso : 0;
+    
+    const castas = filteredData.reduce((acc: any, curr) => {
+      acc[curr.CastaDesc] = (acc[curr.CastaDesc] || 0) + curr.PesoLiquido;
+      return acc;
+    }, {});
+    const topCasta = Object.entries(castas).sort((a: any, b: any) => b[1] - a[1])[0] || ["-", 0];
+
+    const socios = filteredData.reduce((acc: any, curr) => {
+      acc[curr.Nome] = (acc[curr.Nome] || 0) + curr.PesoLiquido;
+      return acc;
+    }, {});
+    const topSocio = Object.entries(socios).sort((a: any, b: any) => b[1] - a[1])[0] || ["-", 0];
+
+    return { 
+      totalPeso, 
+      totalValor, 
+      avgGrau, 
+      totalGrauKilos,
+      topCastaName: topCasta[0],
+      topCastaValue: topCasta[1] as number,
+      topSocioName: topSocio[0],
+      topSocioValue: topSocio[1] as number,
+      count: filteredData.length 
+    };
   }, [filteredData]);
 
   const dataByCasta = useMemo(() => {
     const grouped = filteredData.reduce((acc: any, curr) => {
-      if (!acc[curr.CastaDesc]) acc[curr.CastaDesc] = { name: curr.CastaDesc, value: 0 };
+      if (!acc[curr.CastaDesc]) acc[curr.CastaDesc] = { name: curr.CastaDesc, value: 0, grauKg: 0 };
       acc[curr.CastaDesc].value += curr.PesoLiquido;
+      acc[curr.CastaDesc].grauKg += (curr.PesoLiquido * curr.grau);
       return acc;
     }, {});
-    return Object.values(grouped).sort((a: any, b: any) => b.value - a.value).slice(0, 7);
+    const sortedByKg = Object.values(grouped).sort((a: any, b: any) => (b as any).value - (a as any).value).slice(0, 7) as any[];
+    const sortedByGrauKg = Object.values(grouped).sort((a: any, b: any) => (b as any).grauKg - (a as any).grauKg).slice(0, 7) as any[];
+    return { sortedByKg, sortedByGrauKg };
   }, [filteredData]);
 
   const dataBySocio = useMemo(() => {
     const grouped = filteredData.reduce((acc: any, curr) => {
-      if (!acc[curr.Nome]) acc[curr.Nome] = { name: curr.Nome, peso: 0 };
+      if (!acc[curr.Nome]) acc[curr.Nome] = { name: curr.Nome, peso: 0, grauKg: 0 };
       acc[curr.Nome].peso += curr.PesoLiquido;
+      acc[curr.Nome].grauKg += (curr.PesoLiquido * curr.grau);
       return acc;
     }, {});
-    return Object.values(grouped).sort((a: any, b: any) => b.peso - a.peso).slice(0, 10);
+    const sortedByKg = Object.values(grouped).sort((a: any, b: any) => (b as any).peso - (a as any).peso).slice(0, 10) as any[];
+    const sortedByGrauKg = Object.values(grouped).sort((a: any, b: any) => (b as any).grauKg - (a as any).grauKg).slice(0, 10) as any[];
+    return { sortedByKg, sortedByGrauKg };
   }, [filteredData]);
 
   if (loading) return (
@@ -131,170 +168,252 @@ const Dashboard: React.FC = () => {
   );
 
   return (
-    <div className="flex bg-slate-50 min-h-screen">
-      {/* Filters Sidebar */}
-      <aside className="auth-sidebar">
-        <div className="sidebar-title">
-          <Wine className="w-8 h-8 text-indigo-400" />
-          VINDIMA
-        </div>
-
-        <div className="space-y-6">
-          <div className="pb-4 border-b border-white/10 flex justify-between items-center">
-             <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-widest">Opções de Selecção</h4>
-             <button onClick={clearFilters} className="text-white/40 hover:text-white transition-colors">
+    <div className="bg-slate-50 min-h-screen">
+      {/* Top Filter Bar with 'Cor de Vinha' */}
+      <header className="filters-top-bar">
+        <div className="top-bar-content">
+          <div className="flex justify-between items-center mb-6">
+            <div className="sidebar-title !mb-0 text-white">
+              <Wine className="w-8 h-8 text-orange-400" />
+              <span>VINDIMA ANALYTICS</span>
+            </div>
+            <div className="flex items-center gap-6">
+              <button onClick={clearFilters} className="text-white/60 hover:text-white transition-colors flex items-center gap-2 text-xs font-bold uppercase tracking-widest px-4 py-2 bg-white/5 rounded-lg border border-white/10">
                 <RefreshCw className="w-4 h-4" />
-             </button>
+                Limpar Filtros
+              </button>
+              <div className="hidden md:block text-[10px] text-white/30 font-medium uppercase tracking-widest">
+                  Adega Cooperativa de Palmela © 2026
+              </div>
+            </div>
           </div>
 
-          <SidebarSelect 
-            label="Campanha Geral" 
-            value={filters.Campanha} 
-            options={getUniqueOptions('Campanha')} 
-            onChange={(v) => handleFilterChange('Campanha', v)} 
-          />
-          <SidebarSelect 
-            label="Sócio Cooperante" 
-            value={filters.Nome} 
-            options={getUniqueOptions('Nome')} 
-            onChange={(v) => handleFilterChange('Nome', v)} 
-          />
-          <SidebarSelect 
-            label="Variedade (Casta)" 
-            value={filters.CastaDesc} 
-            options={getUniqueOptions('CastaDesc')} 
-            onChange={(v) => handleFilterChange('CastaDesc', v)} 
-          />
-          <SidebarSelect 
-            label="Local / Propriedade" 
-            value={filters.PropriedadeDesc} 
-            options={getUniqueOptions('PropriedadeDesc')} 
-            onChange={(v) => handleFilterChange('PropriedadeDesc', v)} 
-          />
-          <SidebarSelect 
-            label="Parcela Produção" 
-            value={filters.ParcelaDesc} 
-            options={getUniqueOptions('ParcelaDesc')} 
-            onChange={(v) => handleFilterChange('ParcelaDesc', v)} 
-          />
-          <SidebarSelect 
-            label="Cor da Uva" 
-            value={filters.CDU_Cor} 
-            options={getUniqueOptions('CDU_Cor')} 
-            onChange={(v) => handleFilterChange('CDU_Cor', v)} 
-          />
+          <div className="filters-grid">
+            <SidebarSelect 
+              label="Campanha Geral" 
+              value={filters.Campanha} 
+              options={availableOptions.Campanha} 
+              onChange={(v) => handleFilterChange('Campanha', v)} 
+            />
+            <SidebarSelect 
+              label="Sócio Cooperante" 
+              value={filters.Nome} 
+              options={availableOptions.Nome} 
+              onChange={(v) => handleFilterChange('Nome', v)} 
+            />
+            <SidebarSelect 
+              label="Variedade (Casta)" 
+              value={filters.CastaDesc} 
+              options={availableOptions.CastaDesc} 
+              onChange={(v) => handleFilterChange('CastaDesc', v)} 
+            />
+            <SidebarSelect 
+              label="Local / Propriedade" 
+              value={filters.PropriedadeDesc} 
+              options={availableOptions.PropriedadeDesc} 
+              onChange={(v) => handleFilterChange('PropriedadeDesc', v)} 
+            />
+            <SidebarSelect 
+              label="Parcela Produção" 
+              value={filters.ParcelaDesc} 
+              options={availableOptions.ParcelaDesc} 
+              onChange={(v) => handleFilterChange('ParcelaDesc', v)} 
+            />
+            <SidebarSelect 
+              label="Cor da Uva" 
+              value={filters.CDU_Cor} 
+              options={availableOptions.CDU_Cor} 
+              onChange={(v) => handleFilterChange('CDU_Cor', v)} 
+            />
+          </div>
         </div>
-
-        <div className="mt-auto pt-10 text-[10px] text-white/20 font-medium uppercase tracking-widest">
-            Adega Cooperativa de Palmela © 2026
-        </div>
-      </aside>
+      </header>
 
       {/* Main Dashboard Area */}
       <main className="main-content">
-        <header className="flex justify-between items-end mb-10">
-          <div>
-            <h2 className="text-3xl font-bold text-slate-900 font-outfit uppercase">Exploração de Dados</h2>
-            <p className="text-slate-500 mt-1 flex items-center gap-2">
-              <Layers className="w-4 h-4" />
-              Baseado nas selecções de parâmetros à esquerda
-            </p>
+        {/* Compact Summary Ribbon */}
+        <section className="summary-ribbon sticky top-[132px] z-[90]">
+          <div className="flex flex-col border-r border-slate-100 pr-6 shrink-0">
+             <div className="flex items-center gap-2 mb-1">
+                <Layers className="w-3 h-3 text-indigo-600" />
+                <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Dashboard</h2>
+             </div>
+             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Resumo de Dados</p>
           </div>
-          <div className="flex gap-2">
-            <div className="px-4 py-2 bg-white border border-slate-200 rounded-xl shadow-sm text-sm font-bold text-slate-700">
-               {stats.count} Registos encontratos
-            </div>
+          
+          <div className="summary-grid">
+            <KPICard 
+              title="Uva Entregue" 
+              value={`${stats.totalPeso.toLocaleString()} Kg`} 
+              icon={<Package className="text-indigo-600" />}
+              color="indigo"
+              subtitle={`Casta: ${stats.topCastaName}`}
+            />
+            <KPICard 
+              title="Grau/Kg Entregue" 
+              value={`${Math.round(stats.totalGrauKilos).toLocaleString()} G/K`} 
+              icon={<Zap className="text-amber-500" />}
+              color="amber"
+              subtitle={`Qualid.: ${stats.avgGrau.toFixed(1)}º`}
+            />
+            <KPICard 
+              title="Valorização Total" 
+              value={`${stats.totalValor.toLocaleString('pt-PT', { minimumFractionDigits: 2 })} €`} 
+              icon={<TrendingUp className="text-emerald-500" />}
+              color="emerald"
+              subtitle={`Sócios: ${new Set(filteredData.map(d => d.CodSocio)).size}`}
+            />
+            <KPICard 
+               title="Registos" 
+               value={stats.count.toLocaleString()} 
+               icon={<RefreshCw className="text-blue-500" />}
+               color="blue"
+               subtitle="Total Encontrados"
+            />
           </div>
-        </header>
-
-        {/* KPI Grid */}
-        <section className="kpi-row">
-          <KPICard 
-            title="Peso Acumulado (Kg)" 
-            value={stats.totalPeso.toLocaleString()} 
-            icon={<Package className="text-indigo-600" />}
-            color="indigo"
-          />
-          <KPICard 
-            title="Grau Médio (º)" 
-            value={stats.avgGrau.toFixed(2)} 
-            icon={<Zap className="text-amber-500" />}
-            color="amber"
-          />
-          <KPICard 
-            title="Valorização Total (€)" 
-            value={stats.totalValor.toLocaleString('pt-PT', { minimumFractionDigits: 2 })} 
-            icon={<TrendingUp className="text-emerald-500" />}
-            color="emerald"
-          />
-          <KPICard 
-            title="Sócios Activos" 
-            value={new Set(filteredData.map(d => d.CodSocio)).size.toString()} 
-            icon={<Users className="text-blue-500" />}
-            color="blue"
-          />
         </section>
 
         {/* Charts Section */}
         {filteredData.length > 0 ? (
-          <div className="chart-grid">
-            <div className="chart-container">
-              <div className="chart-header">
-                <h3 className="chart-title flex items-center gap-2">
-                    <TableIcon className="w-4 h-4 text-indigo-500" />
-                    Top Sócios por Entrega (Barras)
-                </h3>
+          <div className="space-y-12">
+            {/* Row 1: Weight Analysis */}
+            <div>
+              <div className="flex items-center gap-3 mb-6">
+                 <div className="h-8 w-1 bg-indigo-600 rounded-full" />
+                 <h3 className="text-xl font-bold text-slate-800 font-outfit uppercase tracking-tight">Análise de Massa (Kg)</h3>
               </div>
-              <ResponsiveContainer width="100%" height={350}>
-                <BarChart data={dataBySocio} layout="vertical" margin={{ left: 40, right: 40 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-                  <XAxis type="number" hide />
-                  <YAxis 
-                    dataKey="name" 
-                    type="category" 
-                    stroke="#94a3b8" 
-                    fontSize={11} 
-                    width={140} 
-                    tickLine={false}
-                    axisLine={false}
-                  />
-                  <Tooltip 
-                    cursor={{ fill: '#f8fafc' }}
-                    contentStyle={{ border: 'none', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                  />
-                  <Bar dataKey="peso" fill="#4f46e5" radius={[0, 8, 8, 0]} barSize={24} />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="chart-grid">
+                <div className="chart-container">
+                  <div className="chart-header">
+                    <h3 className="chart-title flex items-center gap-2">
+                        <TableIcon className="w-4 h-4 text-indigo-500" />
+                        Top Sócios por Entrega (Barras)
+                    </h3>
+                  </div>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={dataBySocio.sortedByKg} layout="vertical" margin={{ left: 40, right: 40 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                      <XAxis type="number" hide />
+                      <YAxis 
+                        dataKey="name" 
+                        type="category" 
+                        stroke="#94a3b8" 
+                        fontSize={11} 
+                        width={140} 
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <Tooltip 
+                        cursor={{ fill: '#f8fafc' }}
+                        contentStyle={{ border: 'none', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                        formatter={(value: any) => [`${value?.toLocaleString()} Kg`, 'Peso']}
+                      />
+                      <Bar dataKey="peso" fill="#4f46e5" radius={[0, 8, 8, 0]} barSize={24} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="chart-container">
+                  <div className="chart-header">
+                    <h3 className="chart-title flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-indigo-500" />
+                        Distribuição por Casta (Piza)
+                    </h3>
+                  </div>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <PieChart>
+                      <Pie
+                        data={dataByCasta.sortedByKg}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={80}
+                        outerRadius={120}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {dataByCasta.sortedByKg.map((_: any, index: number) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                         contentStyle={{ border: 'none', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                         formatter={(value: any) => [`${value?.toLocaleString()} Kg`, 'Peso']}
+                      />
+                      <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px', fontSize: '11px' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
 
-            <div className="chart-container">
-              <div className="chart-header">
-                <h3 className="chart-title flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-indigo-500" />
-                    Distribuição por Casta (Piza)
-                </h3>
+            {/* Row 2: Potential Analysis */}
+            <div>
+              <div className="flex items-center gap-3 mb-6">
+                 <div className="h-8 w-1 bg-amber-500 rounded-full" />
+                 <h3 className="text-xl font-bold text-slate-800 font-outfit uppercase tracking-tight">Análise de Potencial (Grau-Kg)</h3>
               </div>
-              <ResponsiveContainer width="100%" height={350}>
-                <PieChart>
-                  <Pie
-                    data={dataByCasta}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={80}
-                    outerRadius={120}
-                    paddingAngle={4}
-                    dataKey="value"
-                  >
-                    {dataByCasta.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                     contentStyle={{ border: 'none', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                  />
-                  <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px', fontSize: '11px' }} />
-                </PieChart>
-              </ResponsiveContainer>
+              <div className="chart-grid">
+                <div className="chart-container">
+                  <div className="chart-header">
+                    <h3 className="chart-title flex items-center gap-2">
+                        <TableIcon className="w-4 h-4 text-amber-500" />
+                        Top Sócios por Qualidade (Grau-Kg)
+                    </h3>
+                  </div>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <BarChart data={dataBySocio.sortedByGrauKg} layout="vertical" margin={{ left: 40, right: 40 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                      <XAxis type="number" hide />
+                      <YAxis 
+                        dataKey="name" 
+                        type="category" 
+                        stroke="#94a3b8" 
+                        fontSize={11} 
+                        width={140} 
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <Tooltip 
+                        cursor={{ fill: '#f8fafc' }}
+                        contentStyle={{ border: 'none', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                        formatter={(value: any) => [`${Math.round(value || 0).toLocaleString()} G/K`, 'Potencial']}
+                      />
+                      <Bar dataKey="grauKg" fill="#f59e0b" radius={[0, 8, 8, 0]} barSize={24} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="chart-container">
+                  <div className="chart-header">
+                    <h3 className="chart-title flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-amber-500" />
+                        Distribuição por Potencial (Piza)
+                    </h3>
+                  </div>
+                  <ResponsiveContainer width="100%" height={350}>
+                    <PieChart>
+                      <Pie
+                        data={dataByCasta.sortedByGrauKg}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={80}
+                        outerRadius={120}
+                        paddingAngle={4}
+                        dataKey="grauKg"
+                      >
+                        {dataByCasta.sortedByGrauKg.map((_: any, index: number) => (
+                          <Cell key={`cell-potential-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                         contentStyle={{ border: 'none', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                         formatter={(value: any) => [`${Math.round(value || 0).toLocaleString()} G/K`, 'Potencial']}
+                      />
+                      <Legend iconType="circle" wrapperStyle={{ paddingTop: '20px', fontSize: '11px' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
@@ -348,7 +467,9 @@ const Dashboard: React.FC = () => {
   );
 };
 
-const SidebarSelect = ({ label, value, options, onChange }: any) => (
+const SidebarSelect = ({ label, value, options, onChange }: { 
+  label: string, value: string, options: string[], onChange: (v: string) => void 
+}) => (
   <div className="filter-group">
     <label className="filter-label">{label}</label>
     <select 
@@ -357,28 +478,29 @@ const SidebarSelect = ({ label, value, options, onChange }: any) => (
       className="filter-select"
     >
       <option value="">-- Todos --</option>
-      {options.map(opt => (
+      {options.map((opt: string) => (
         <option key={opt} value={opt}>{opt}</option>
       ))}
     </select>
   </div>
 );
 
-const KPICard = ({ title, value, icon, color }: any) => (
-  <div className="kpi-card relative overflow-hidden">
-    <div className="flex justify-between items-center mb-4">
-      <div className="p-3 bg-slate-50 rounded-xl">
-        {icon}
-      </div>
-      <div className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 bg-green-100 text-green-700 rounded-lg`}>
-        Online
+const KPICard = ({ title, value, color, subtitle }: {
+  title: string, value: string, icon: React.ReactElement, color: string, subtitle?: string
+}) => (
+  <div className="kpi-card group hover:translate-y-[-1px] transition-all duration-300 !py-2">
+    <div className="min-w-0 flex-1">
+      <p className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis">{title}</p>
+      <div className="flex items-baseline gap-2">
+        <h2 className="text-base font-black text-slate-900 font-outfit truncate">{value}</h2>
+        {subtitle && (
+          <p className="text-[9px] font-medium text-slate-400 flex items-center gap-1 truncate opacity-70">
+            {subtitle}
+          </p>
+        )}
       </div>
     </div>
-    <div className="relative z-10">
-      <p className="text-slate-500 text-xs font-semibold mb-1 uppercase tracking-wider">{title}</p>
-      <h2 className="text-2xl font-black text-slate-900 font-outfit">{value}</h2>
-    </div>
-    <div className={`absolute bottom-0 left-0 h-1 bg-${color}-600 w-full opacity-10`} />
+    <div className={`absolute bottom-0 left-0 h-0.5 bg-${color}-500 w-full opacity-10 group-hover:opacity-40 transition-opacity`} />
   </div>
 );
 
